@@ -20,9 +20,10 @@ class LexicalAnalyzer
 
     // Массив зарезервированных слов
 //    const RESERV_LEX = ['int', 'float', 'double', 'string', 'char', 'void'];
-    const TYPES = ['integer', 'float', 'char', 'void'];
+    // Служебные слова (типы)
+    const SERVICE_LEX = ['integer', 'float', 'char', 'void'];
     // Массив разделителей
-    const DELIMITER_LEX = ['(', ')', '{', '}', ',', ':', ';'];
+    const DELIMITER_LEX = ['(', ')', '{', '}', ',', ':', ';', '"'];
     // Массив операций
     const OPERATION_LEX = ['+', '-', '/', '*', '%', '=', '<<', '>>', '<', '>'];
     // начало программы
@@ -33,70 +34,94 @@ class LexicalAnalyzer
     public $current_position = 0;
     public $current_type;
 
-    public function findClassLex($value) {
+    public function findClassLex($symbol, &$value, FSM $fsm) {
 
-        switch ()
+        if ($fsm->state === FSM::DEFAULT) {
+            $this->checkClass($value, $symbol, $fsm);
+        } else {
+            $t = 2;
+        }
 
-        switch($value) {
-            case $this->isType($value):
+        switch ($fsm->state) {
+            case FSM::REQUEUE_IDENTIFIER:
+                if (!$this->isIdentifier($symbol, $value)) {
+                    $fsm->setState(FSM::DEFAULT);
+                    $this->setType('IDENTIFIER', $value);
+                    $value = '';
+                    $this->findClassLex($symbol, $value, $fsm);
+                } else {
+                    $value.= trim($symbol);
+                }
                 break;
-            case $this->isIdentifier($value):
+            case FSM::REQUEUE_NOT_LITERAL:
+                if ($this->isLiteral($symbol, $value, $fsm)) {
+                    $value .= trim($symbol);
+                } else {
+                    $this->setType('LITERAL', $value);
+                    $fsm->setState(FSM::DEFAULT);
+                    $value = '';
+                    $this->findClassLex($symbol, $value, $fsm);
+                }
                 break;
-            case $this->isDelimiter($value):
-                break;
-            case $this->isOperation($value):
-                break;
-            case $this->isLiteral($value):
+            case FSM::DEFAULT:
+                $value.= trim($symbol);
                 break;
         }
+        return true;
+    }
+
+    public function checkClass(&$value, &$symbol, FSM &$fsm)
+    {
+        if ($this->isType($value, $fsm)) {
+            $value = '';
+            return true;
+        }
+        if ($this->isDelimiter($symbol)) {
+            return true;
+        }
+        if ($this->isOperation($symbol)) {
+            return true;
+        }
+        if  ($this->isLiteral($symbol, $value, $fsm, true)) {
+            return true;
+        }
+        return false;
     }
 
     public function setType(string $type, $value)
     {
-        $this->current_type = ['type' => $type, 'value' => $value];
+        $this->tables[] = $value.':'.$type;
     }
 
     public function analyze(string $text)
     {
+        $fsm = new FSM();
         $source = explode(PHP_EOL,$text);
         foreach ($source as $str)
         {
             $this->current_string = str_split(trim($str));
             $val = '';
-            foreach ($this->current_string as $index => $symbol)
-            {
-
+            foreach ($this->current_string as $index => $symbol) {
+                if (ctype_space($symbol)) {
+                    continue;
+                }
+                $this->findClassLex($symbol, $val, $fsm);
             }
         }
         return true;
     }
 
-    public function isLexIdentify($value = null)
-    {
-        if ($value === LexicalAnalyzer::BEGIN_PROGRAM) {
-            return true;
-        }
-
-        if (!empty($this->current_type)) {
-            if ($this->current_type['type'] !== '0') {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
      * If lex is type
      * @param $value
+     * @param FSM $fsm
      * @return bool
      */
-    public function isType($value)
+    public function isType($value, FSM &$fsm)
     {
-        if (in_array($value,LexicalAnalyzer::RESERV_LEX)) {
-            $this->setType(LexicalAnalyzer::RESERV_CLASS, $value);
-            if (in_array($value, LexicalAnalyzer::TYPES)) {
-                $this->state = self::RESERV_CLASS;
-            }
+        if (in_array($value,LexicalAnalyzer::SERVICE_LEX)) {
+            $this->setType('SERVICE', $value);
+            $fsm->setState(FSM::REQUEUE_IDENTIFIER);
             return true;
         }
         return false;
@@ -107,10 +132,11 @@ class LexicalAnalyzer
      * @param $value
      * @return bool
      */
-    public function isDelimiter($value)
+    public function isDelimiter(&$value)
     {
         if (in_array($value,LexicalAnalyzer::DELIMITER_LEX)) {
-            $this->setType(LexicalAnalyzer::DELIMITER_CLASS, $value);
+            $this->setType('DELIMITER', $value);
+            $value = '';
             return true;
         }
         return false;
@@ -121,11 +147,11 @@ class LexicalAnalyzer
      * @param $value
      * @return bool
      */
-    public function isOperation($value)
+    public function isOperation(&$value)
     {
         if (in_array($value,LexicalAnalyzer::OPERATION_LEX)) {
-            $this->setType(LexicalAnalyzer::OPERATION_CLASS, $value);
-            $this->state = LexicalAnalyzer::OPERATION_CLASS;
+            $this->setType('OPERATION', $value);
+            $value = '';
             return true;
         }
         return false;
@@ -133,23 +159,16 @@ class LexicalAnalyzer
 
     /**
      * If lex is identifier
+     * @param $symbol
      * @param $value
      * @return bool
      */
-    public function isIdentifier($value)
+    public function isIdentifier($symbol, &$value)
     {
-        if ($this->state === LexicalAnalyzer::OPERATION_CLASS) {
-            preg_match('/^([a-zA-Z_]+[\da-zA-Z_]+)/', $value, $isIdentifier);
+        $val = $value.$symbol;
+        preg_match('/^[a-zA-Z_]+[\da-zA-Z_]{0,}$/', $val, $isIdentifier);
 
-            if ($isIdentifier) {
-                $this->setType(LexicalAnalyzer::IDENTIFIER_CLASS, $value);
-                return true;
-            }
-        } else if ($value === LexicalAnalyzer::BEGIN_PROGRAM) {
-            $this->setType(LexicalAnalyzer::IDENTIFIER_CLASS, $value);
-            return true;
-        }
-        return false;
+        return !empty($isIdentifier);
     }
 
     /**
@@ -157,11 +176,12 @@ class LexicalAnalyzer
      * @param $value
      * @return bool
      */
-    public function isLiteral($value)
+    public function isLiteral($symbol, &$value, FSM &$fsm, $flag = false)
     {
-        preg_match('/^([\d]+)/', $value, $isLex);
+        $val = $value.$symbol;
+        preg_match('/^[\d+]$|^[\d]+[a-zA-z_\d.,-]+?$/', $val, $isLex);
         if ($isLex) {
-            $this->setType(LexicalAnalyzer::LITERAL_CLASS, $value);
+            $fsm->setState(FSM::REQUEUE_NOT_LITERAL);
             return true;
         }
         return false;

@@ -6,15 +6,16 @@ function start()
 {
     $lex = new \LexicalAnalyzer();
 
-    $text = "int main()
+    $full = "integer main()
 {
-	int a = 5;
+	integer a = 51;
 	a = 4;
 	console << a;
 
 	return 0;
 }";
-
+    $part = 'integer a = "5rt";';
+    $text = $part;
     $lex->analyze($text);
 
 }
