@@ -5,165 +5,254 @@ require_once "FSM.php";
 class LexicalAnalyzer
 {
 
-    public $tables;
+    public $tables = [
+        'IDENTIFIER' => [],
+        'LITERAL' => [],
+        'DELIMITER' => [],
+        'OPERATION' => [],
+        'KEYWORD' => [],
+    ];
 
     // идентификаторы
     const IDENTIFIER_CLASS = 0;
     // зарезервированные/ключевые слова
-    const RESERV_CLASS = 1;
-    // разделители
-    const DELIMITER_CLASS = 2;
-    // операции
-    const OPERATION_CLASS = 3;
-    // лексемы
-    const LITERAL_CLASS = 3;
+    const KEY_WORD_CLASS = 'KEYWORD';
+    const ID_CLASS = 'IDENTIFIER';
+    const DELIMITER_CLASS = 'DELIMITER';
+    const OPERATION_CLASS = 'OPERATION';
+    const LITERAL_CLASS = 'LITERAL';
+
+    const STATE_WAITING_ID = 'ID';
+    const STATE_LITERAL = 'LITERAL';
+    const STATE_ERROR = 'ERROR';
+    const STATE_WAITING_STRING = 'LITERAL_STRING';
 
     // Массив зарезервированных слов
-//    const RESERV_LEX = ['int', 'float', 'double', 'string', 'char', 'void'];
-    const TYPES = ['integer', 'float', 'char', 'void'];
+    const KEY_WORDS = ['integer', 'float', 'char', 'void', 'string', 'return', 'console', 'for', 'while', 'if', 'else', 'true', 'false', 'null'];
+    const TYPES = ['integer', 'float', 'char', 'void', 'string'];
     // Массив разделителей
-    const DELIMITER_LEX = ['(', ')', '{', '}', ',', ':', ';'];
+    const DELIMITER_LEX = ['(', ')', '{', '}', ',', ':', ';', "\"",'[',']'];
+    const DELIMITER_STRING = ['"'];
     // Массив операций
-    const OPERATION_LEX = ['+', '-', '/', '*', '%', '=', '<<', '>>', '<', '>'];
-    // начало программы
-    const BEGIN_PROGRAM = 'main';
+    const OPERATIONS = ['+', '-', '/', '*', '%', '=', '<<', '>>', '<', '>'];
 
+    public $identifier_table = [];
+
+    public $prev_state;
     public $state;
+
+    public $current_row_index = 0;
+    public $current_str_index = 0;
+
+    public $prev_value = '';
+    public $value = '';
+
     public $current_string = '';
-    public $current_position = 0;
-    public $current_type;
+    public $next_symbol = '';
 
-    public function findClassLex($value) {
+    public function findClassLex($symbol)
+    {
+        $this->value .= $symbol;
 
-        switch ()
+        $this->checkClass();
 
-        switch($value) {
-            case $this->isType($value):
+        return true;
+    }
+
+    public function checkClass()
+    {
+        switch ($this->state) {
+            case self::STATE_WAITING_ID:
+                $this->isKeyWord();
+                $this->isIdentifier();
                 break;
-            case $this->isIdentifier($value):
+            case self::STATE_WAITING_STRING:
+                $this->isLiteral();
                 break;
-            case $this->isDelimiter($value):
-                break;
-            case $this->isOperation($value):
-                break;
-            case $this->isLiteral($value):
-                break;
+            default:
+                $this->isKeyWord();
+                $this->isIdentifier();
+                $this->isDelimiter();
+                $this->isLiteral();
+                $this->isOperation();
         }
-    }
-
-    public function setType(string $type, $value)
-    {
-        $this->current_type = ['type' => $type, 'value' => $value];
-    }
-
-    public function analyze(string $text)
-    {
-        $source = explode(PHP_EOL,$text);
-        foreach ($source as $str)
-        {
-            $this->current_string = str_split(trim($str));
-            $val = '';
-            foreach ($this->current_string as $index => $symbol)
-            {
-
-            }
+        if (ctype_space($this->value)) {
+            $this->value = trim($this->value);
         }
         return true;
     }
 
-    public function isLexIdentify($value = null)
+    public function setType(string $type, $value, $state = '')
     {
-        if ($value === LexicalAnalyzer::BEGIN_PROGRAM) {
-            return true;
+        $this->tables[$type][] = $value;
+        $this->prev_value = $value;
+        $this->value = '';
+        $this->state = '';
+        $this->prev_state = $state;
+    }
+
+    public function analyze(array $text)
+    {
+        foreach ($text as $row_index => $str) {
+            $this->current_string = str_split(trim($str));
+            $this->current_row_index = $row_index+1;
+
+            $str_length = count($this->current_string);
+            $this->resetState();
+
+            foreach ($this->current_string as $index => $symbol) {
+                $this->current_str_index = $index;
+
+                $this->next_symbol = $index + 1 < $str_length ? $this->current_string[$index + 1] : '';
+
+                $this->findClassLex($symbol);
+                if ($this->state === self::STATE_ERROR) {
+                    return $this->value;
+                }
+            }
         }
 
-        if (!empty($this->current_type)) {
-            if ($this->current_type['type'] !== '0') {
+        if ($this->state === self::STATE_WAITING_STRING) {
+            $this->addError('Incorrect string value!', $this->value);
+            return $this->value;
+        }
+
+        return $this->tables;
+    }
+
+    public function isKeyWord()
+    {
+        if (in_array($this->value, self::KEY_WORDS)) {
+            $this->setType(self::KEY_WORD_CLASS, $this->value, self::KEY_WORD_CLASS);
+            return true;
+        }
+        return false;
+    }
+
+    public function addError(string $msg, $value)
+    {
+        $this->value = $msg . ' (row '.$this->current_row_index.', position '.$this->current_str_index.')';
+        $this->state = self::STATE_ERROR;
+        return true;
+    }
+
+    public function isIdentifier_old()
+    {
+        preg_match('/^[_A-Za-z]+[\d_A-Za-z]{0,}$/', $this->value, $is);
+        if ($this->state === self::STATE_WAITING_ID) {
+            preg_match('/^[_A-Za-z]+[\d_A-Za-z]{0,}$/', $this->next_symbol, $isNext);
+            if (!$isNext) {
+                if (in_array($this->value, $this->identifier_table)) {
+                    $this->setIdentifier($this->value);
+                    $this->setType(self::ID_CLASS, $this->value, self::ID_CLASS);
+                    $this->state = '';
+                    return true;
+                }
+                if (!in_array($this->prev_value, self::TYPES)) {
+                    $this->addError('Unknown variable!', $this->value);
+                    return false;
+                }
+                $this->setIdentifier($this->value);
+                $this->setType(self::ID_CLASS, $this->value, self::ID_CLASS);
+                $this->state = '';
+                return true;
+            }
+        }
+        if ($is) {
+            if (in_array($this->value, $this->identifier_table)) {
+                $this->setIdentifier($this->value);
+                $this->setType(self::ID_CLASS, $this->value, self::ID_CLASS);
+                $this->state = '';
+                return true;
+            }
+            $this->state = self::STATE_WAITING_ID;
+        }
+        return false;
+    }
+
+    public function isIdentifier()
+    {
+        preg_match('/^[_A-Za-z]+[\d_A-Za-z]{0,}$/', $this->value, $is);
+        if ($is)
+        {
+            preg_match('/^[_A-Za-z]+[\d_A-Za-z]{0,}$/', $this->next_symbol, $isNext);
+            if (!$isNext)
+            {
+                if (!in_array($this->value, $this->identifier_table)) {
+                    $this->setIdentifier($this->value);
+                    $this->setType(self::ID_CLASS, $this->value);
+                } else {
+                    $this->value = '';
+                }
                 return true;
             }
         }
         return false;
     }
 
-    /**
-     * If lex is type
-     * @param $value
-     * @return bool
-     */
-    public function isType($value)
+    public function setIdentifier($value)
     {
-        if (in_array($value,LexicalAnalyzer::RESERV_LEX)) {
-            $this->setType(LexicalAnalyzer::RESERV_CLASS, $value);
-            if (in_array($value, LexicalAnalyzer::TYPES)) {
-                $this->state = self::RESERV_CLASS;
-            }
+        $this->identifier_table[] = $value;
+    }
+
+    public function isDelimiter()
+    {
+        if (in_array($this->value, self::DELIMITER_LEX)) {
+            $this->setType(self::DELIMITER_CLASS,  $this->value);
             return true;
         }
         return false;
     }
 
-    /**
-     * If lex is delimiter
-     * @param $value
-     * @return bool
-     */
-    public function isDelimiter($value)
+    public function isOperation()
     {
-        if (in_array($value,LexicalAnalyzer::DELIMITER_LEX)) {
-            $this->setType(LexicalAnalyzer::DELIMITER_CLASS, $value);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * If lex is operation
-     * @param $value
-     * @return bool
-     */
-    public function isOperation($value)
-    {
-        if (in_array($value,LexicalAnalyzer::OPERATION_LEX)) {
-            $this->setType(LexicalAnalyzer::OPERATION_CLASS, $value);
-            $this->state = LexicalAnalyzer::OPERATION_CLASS;
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * If lex is identifier
-     * @param $value
-     * @return bool
-     */
-    public function isIdentifier($value)
-    {
-        if ($this->state === LexicalAnalyzer::OPERATION_CLASS) {
-            preg_match('/^([a-zA-Z_]+[\da-zA-Z_]+)/', $value, $isIdentifier);
-
-            if ($isIdentifier) {
-                $this->setType(LexicalAnalyzer::IDENTIFIER_CLASS, $value);
+        if (in_array($this->value, self::OPERATIONS)) {
+            if (in_array($this->next_symbol, self::OPERATIONS)) {
                 return true;
             }
-        } else if ($value === LexicalAnalyzer::BEGIN_PROGRAM) {
-            $this->setType(LexicalAnalyzer::IDENTIFIER_CLASS, $value);
+            $this->setType(self::OPERATION_CLASS, $this->value, self::OPERATION_CLASS);
             return true;
         }
         return false;
     }
 
-    /**
-     * If lex is literal
-     * @param $value
-     * @return bool
-     */
-    public function isLiteral($value)
+    public function isLiteral()
     {
-        preg_match('/^([\d]+)/', $value, $isLex);
-        if ($isLex) {
-            $this->setType(LexicalAnalyzer::LITERAL_CLASS, $value);
-            return true;
+        // is number
+        preg_match('/^[\d.,]+$/', $this->value, $isNumber);
+        if ($isNumber) {
+            preg_match('/^[\d.,]+$/',$this->next_symbol,$isNext);
+            if ($isNext) {
+                $this->state = self::STATE_LITERAL;
+                return true;
+            } else {
+                $this->setType(self::LITERAL_CLASS, $this->value, self::LITERAL_CLASS);
+            }
+        }
+        // if string
+        if ($this->state === self::STATE_WAITING_STRING)
+        {
+            $string = $this->value.$this->next_symbol;
+            preg_match('/^[a-zA-Z\d\s]+"$/', $string, $isString);
+            if ($isString) {
+                $this->setType(self::LITERAL_CLASS, $this->value);
+                return true;
+            }
+        } else {
+            $string = $this->prev_value.$this->value;
+            preg_match('/^"[a-zA-Z\d\s]+/', $string, $isString);
+            if ($isString)
+            {
+                $this->state = self::STATE_WAITING_STRING;
+                return true;
+            }
         }
         return false;
+    }
+
+    public function resetState()
+    {
+        $this->state = '';
+        $this->prev_state = '';
     }
 }
