@@ -13,6 +13,8 @@ class LexicalAnalyzer
         'KEYWORD' => [],
     ];
 
+    public $lexems = [];
+
     // идентификаторы
     const IDENTIFIER_CLASS = 0;
     // зарезервированные/ключевые слова
@@ -85,6 +87,7 @@ class LexicalAnalyzer
     public function setType(string $type, $value, $state = '')
     {
         $this->tables[$type][] = $value;
+        $this->lexems[] = ['type' => $type, 'value' => $value];
         $this->prev_value = $value;
         $this->value = '';
         $this->state = '';
@@ -182,6 +185,7 @@ class LexicalAnalyzer
                     $this->setIdentifier($this->value);
                     $this->setType(self::ID_CLASS, $this->value);
                 } else {
+                    $this->setType(self::ID_CLASS, $this->value);
                     $this->value = '';
                 }
                 return true;

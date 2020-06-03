@@ -36,8 +36,8 @@
             async: false,
             data:  {'data':line_arr},
         }).done(function( msg ) {
-            msg = JSON.parse(msg);
             console.log(msg);
+            msg = JSON.parse(msg);
             print_lexem(msg);
         });
     }
